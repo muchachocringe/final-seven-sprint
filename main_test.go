@@ -1,13 +1,14 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCafeNegative(t *testing.T) {
@@ -52,29 +53,44 @@ func TestCafeWhenOk(t *testing.T) {
 
 func TestCafeCount(t *testing.T) {
 	handler := http.HandlerFunc(mainHandle)
-	city := "moscow" // можно выбрать любой город, например "moscow" или "tula"
+	city := "moscow"
 	totalCafes := len(cafeList[city])
 
 	requests := []struct {
-		count int // передаваемое значение count
-		want  int // ожидаемое количество кафе в ответе
+		count int
+		want  int
 	}{
-		{count: 0, want: 0},
-		{count: 1, want: 1},
-		{count: 2, want: 2},
+		{count: 0, want: 0}, // Ожидаем 0 кафе при count=0
+		{count: 1, want: 1}, // 1 кафе
+		{count: 2, want: 2}, // 2 кафе
 		{count: 100, want: min(100, totalCafes)},
 	}
 
 	for _, v := range requests {
-		url := "/cafe?city=" + city + "&count=" + strconv.Itoa(v.count)
-		response := httptest.NewRecorder()
-		req := httptest.NewRequest("GET", url, nil)
+		t.Run(fmt.Sprintf("count=%d", v.count), func(t *testing.T) {
+			response := httptest.NewRecorder()
+			req := httptest.NewRequest("GET", fmt.Sprintf("/cafe?city=%s&count=%d", city, v.count), nil)
 
-		handler.ServeHTTP(response, req)
+			handler.ServeHTTP(response, req)
 
-		assert.Equal(t, http.StatusOK, response.Code)
-		cafes := strings.Split(response.Body.String(), ",")
-		assert.Equal(t, v.want, len(cafes), "for count=%d", v.count)
+			require.Equal(t, http.StatusOK, response.Code)
+
+			body := strings.TrimSpace(response.Body.String())
+			var cafes []string
+
+			// Обрабатываем случай пустого ответа
+			if body != "" {
+				cafes = strings.Split(body, ",")
+			}
+
+			// Для count=0 проверяем, что ответ пустой
+			if v.count == 0 {
+				assert.Empty(t, body, "Response should be empty for count=0")
+				return
+			}
+
+			assert.Equal(t, v.want, len(cafes))
+		})
 	}
 }
 
@@ -83,8 +99,8 @@ func TestCafeSearch(t *testing.T) {
 	city := "moscow"
 
 	requests := []struct {
-		search    string // передаваемое значение search
-		wantCount int    // ожидаемое количество кафе в ответе
+		search    string
+		wantCount int
 	}{
 		{search: "фасоль", wantCount: 0},
 		{search: "кофе", wantCount: 2},
@@ -92,24 +108,29 @@ func TestCafeSearch(t *testing.T) {
 	}
 
 	for _, v := range requests {
-		url := "/cafe?city=" + city + "&search=" + v.search
-		response := httptest.NewRecorder()
-		req := httptest.NewRequest("GET", url, nil)
+		t.Run(v.search, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			req := httptest.NewRequest("GET", "/cafe?city="+city+"&search="+v.search, nil)
 
-		handler.ServeHTTP(response, req)
+			handler.ServeHTTP(response, req)
 
-		assert.Equal(t, http.StatusOK, response.Code)
-		cafes := strings.Split(response.Body.String(), ",")
-		assert.Equal(t, v.wantCount, len(cafes), "for search=%s", v.search)
+			require.Equal(t, http.StatusOK, response.Code)
 
-		// Проверяем, что каждое кафе содержит искомую строку (без учета регистра)
-		searchLower := strings.ToLower(v.search)
-		for _, cafe := range cafes {
-			if cafe != "" { // пропускаем пустые строки (если wantCount=0)
+			body := strings.TrimSpace(response.Body.String())
+			var cafes []string
+			if body != "" {
+				cafes = strings.Split(body, ",")
+			}
+
+			assert.Equal(t, v.wantCount, len(cafes), "unexpected number of cafes")
+
+			searchLower := strings.ToLower(v.search)
+			for _, cafe := range cafes {
+				cafe = strings.TrimSpace(cafe)
 				assert.True(t, strings.Contains(strings.ToLower(cafe), searchLower),
 					"cafe '%s' should contain '%s'", cafe, v.search)
 			}
-		}
+		})
 	}
 }
 
